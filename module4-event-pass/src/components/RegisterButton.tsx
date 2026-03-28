@@ -1,6 +1,7 @@
 'use client';
 
-import { useOptimistic, useState, useTransition } from 'react';
+import * as React from 'react';
+import { useOptimistic, useState, useTransition, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { registerForEventAction } from '@/actions/eventActions';
 import { Loader2, CheckCircle, AlertCircle } from 'lucide-react';
@@ -28,13 +29,19 @@ export function RegisterButton({
   });
 
   const [hasRegistered, setHasRegistered] = useState(false);
+  const [baseSpots, setBaseSpots] = useState(availableSpots);
+
+  useEffect(() => {
+    setBaseSpots(availableSpots);
+  }, [availableSpots]);
 
   const [optimisticSpots, addOptimistic] = useOptimistic(
-    availableSpots,
-    (currentSpots: number, action: 'register') => {
+    baseSpots,
+    (currentSpots: number, action: 'register' | 'reset') => {
       if (action === 'register') {
         return Math.max(0, currentSpots - 1);
       }
+
       return currentSpots;
     }
   );
@@ -42,18 +49,21 @@ export function RegisterButton({
   const isFull = optimisticSpots <= 0;
   const canRegister = isAvailable && !isFull && !hasRegistered && !isPending;
 
-  async function handleRegister(): Promise<void> {
+  function handleRegister(): void {
     if (!canRegister) return;
 
     setFeedback({ type: null, message: '' });
 
-    // actualización optimista inmediata
-    addOptimistic('register');
+    const previousSpots = baseSpots;
 
     startTransition(async () => {
+      addOptimistic('register');
+
       const result = await registerForEventAction(eventId);
 
       if (!result.success) {
+        setBaseSpots(previousSpots);
+
         setFeedback({
           type: 'error',
           message: result.message,
@@ -61,7 +71,9 @@ export function RegisterButton({
         return;
       }
 
+      setBaseSpots((prev) => Math.max(0, prev - 1));
       setHasRegistered(true);
+
       setFeedback({
         type: 'success',
         message: result.message,

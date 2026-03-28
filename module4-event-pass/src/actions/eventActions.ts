@@ -1,89 +1,28 @@
-// =============================================================================
-// SERVER ACTIONS - Module 4: Event Pass
-// =============================================================================
-// Server Actions son funciones que se ejecutan en el servidor pero pueden
-// ser invocadas directamente desde componentes del cliente.
-//
-// ## ¿Qué son Server Actions?
-//
-// ```
-// ┌─────────────────────────────────────────────────────────────────────────┐
-// │                      SERVER ACTIONS FLOW                                 │
-// ├─────────────────────────────────────────────────────────────────────────┤
-// │                                                                          │
-// │   CLIENTE                              SERVIDOR                          │
-// │   ┌──────────────────┐                ┌──────────────────┐              │
-// │   │  <form           │   HTTP POST    │  'use server'    │              │
-// │   │    action={...}  │ ─────────────> │  async function  │              │
-// │   │  >               │                │    createEvent() │              │
-// │   └──────────────────┘                └────────┬─────────┘              │
-// │                                                 │                        │
-// │                                                 ▼                        │
-// │   ┌──────────────────┐                ┌──────────────────┐              │
-// │   │  useActionState  │   Serialized   │  Base de datos   │              │
-// │   │  para manejar    │ <───────────── │  o almacén       │              │
-// │   │  estado/errores  │   Response     │                  │              │
-// │   └──────────────────┘                └──────────────────┘              │
-// │                                                                          │
-// └─────────────────────────────────────────────────────────────────────────┘
-// ```
-//
-// ## Ventajas de Server Actions
-// 1. No necesitas crear endpoints API manuales
-// 2. TypeScript end-to-end (tipos compartidos)
-// 3. Validación en servidor automática
-// 4. Integración nativa con formularios HTML
-// 5. Funciona sin JavaScript en el cliente (Progressive Enhancement)
-//
-// ## Reglas importantes
-// - Deben declarar 'use server' al inicio
-// - Solo pueden recibir argumentos serializables
-// - Solo pueden retornar valores serializables
-// - Se ejecutan SIEMPRE en el servidor (seguras para DB/secrets)
-// =============================================================================
-
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { redirect } from 'next/navigation';
-import { createEventSchema, type FormState, type CreateEventInput, type FormValues } from '@/types/event';
+import {
+  createEventSchema,
+  type FormState,
+  type CreateEventInput,
+  type FormValues,
+} from '@/types/event';
 import {
   createEvent as createEventInDb,
   updateEvent as updateEventInDb,
   deleteEvent as deleteEventInDb,
   registerForEvent as registerInDb,
+  getEventById,
 } from '@/data/events';
 
 // =============================================================================
 // CREAR EVENTO
 // =============================================================================
 
-/**
- * Server Action para crear un nuevo evento.
- *
- * ## ¿Cómo funciona?
- * 1. Recibe los datos del formulario (FormData o objeto)
- * 2. Valida con Zod en el servidor
- * 3. Si hay errores, retorna el estado con los errores
- * 4. Si es válido, crea el evento y redirige
- *
- * @param prevState - Estado anterior (usado por useActionState)
- * @param formData - Datos del formulario
- * @returns Nuevo estado del formulario
- */
 export async function createEventAction(
   prevState: FormState,
   formData: FormData
 ): Promise<FormState> {
-  // ===========================================================================
-  // EDUCATIONAL NOTE: Server Actions
-  // ===========================================================================
-  // This function runs entirely on the SERVER. Access to databases, secrets,
-  // and internal APIs is safe here.
-  // We receive `formData` directly from the HTML form submission.
-  // ===========================================================================
-
-  // Extraemos valores crudos para preservar en caso de error
   const formValues: FormValues = {
     title: formData.get('title') as string,
     description: formData.get('description') as string,
@@ -101,7 +40,6 @@ export async function createEventAction(
     tags: formData.get('tags') as string,
   };
 
-  // Transformamos a los tipos correctos para validacion
   const rawData = {
     title: formValues.title,
     description: formValues.description,
@@ -122,12 +60,11 @@ export async function createEventAction(
       .filter(Boolean),
   };
 
-  // Validamos con Zod
   const validationResult = createEventSchema.safeParse(rawData);
 
   if (!validationResult.success) {
-    // Convertimos errores de Zod a nuestro formato
     const errors: Record<string, string[]> = {};
+
     for (const issue of validationResult.error.issues) {
       const path = issue.path.join('.');
       if (!errors[path]) {
@@ -140,21 +77,19 @@ export async function createEventAction(
       success: false,
       message: 'Por favor, corrige los errores en el formulario',
       errors,
-      values: formValues, // Preservamos los valores para el formulario
+      values: formValues,
     };
   }
 
-  // Creamos el evento en la "base de datos"
   const event = await createEventInDb(validationResult.data);
 
-  // Revalidamos la caché
   revalidatePath('/events');
   revalidatePath('/');
 
   return {
     success: true,
     message: 'Evento creado correctamente',
-    data: event, // Pasamos el evento para saber su ID
+    data: event,
   };
 }
 
@@ -162,13 +97,6 @@ export async function createEventAction(
 // ACTUALIZAR EVENTO
 // =============================================================================
 
-/**
- * Server Action para actualizar un evento existente.
- *
- * @param id - ID del evento a actualizar
- * @param prevState - Estado anterior
- * @param formData - Datos del formulario
- */
 export async function updateEventAction(
   id: string,
   prevState: FormState,
@@ -176,7 +104,6 @@ export async function updateEventAction(
 ): Promise<FormState> {
   const rawData: Record<string, unknown> = {};
 
-  // Solo incluimos campos que tienen valor
   const title = formData.get('title') as string;
   if (title) rawData.title = title;
 
@@ -224,11 +151,11 @@ export async function updateEventAction(
       .filter(Boolean);
   }
 
-  // Validación parcial (campos opcionales)
   const validationResult = createEventSchema.partial().safeParse(rawData);
 
   if (!validationResult.success) {
     const errors: Record<string, string[]> = {};
+
     for (const issue of validationResult.error.issues) {
       const path = issue.path.join('.');
       if (!errors[path]) {
@@ -244,7 +171,10 @@ export async function updateEventAction(
     };
   }
 
-  const event = await updateEventInDb(id, validationResult.data as Partial<CreateEventInput>);
+  const event = await updateEventInDb(
+    id,
+    validationResult.data as Partial<CreateEventInput>
+  );
 
   if (!event) {
     return {
@@ -268,17 +198,6 @@ export async function updateEventAction(
 // ELIMINAR EVENTO
 // =============================================================================
 
-/**
- * Server Action para eliminar un evento.
- *
- * ## Nota sobre bind()
- * Usamos .bind() para pasar el id como primer argumento.
- * Esto permite usar la action directamente en un formulario.
- *
- * @example
- * const deleteWithId = deleteEventAction.bind(null, event.id);
- * <form action={deleteWithId}>
- */
 export async function deleteEventAction(id: string): Promise<FormState> {
   const deleted = await deleteEventInDb(id);
 
@@ -302,31 +221,56 @@ export async function deleteEventAction(id: string): Promise<FormState> {
 // REGISTRARSE EN EVENTO
 // =============================================================================
 
-/**
- * Server Action para registrarse en un evento.
- *
- * ## useOptimistic
- * Esta action es ideal para usar con useOptimistic porque:
- * 1. La UI puede mostrar +1 registrado inmediatamente
- * 2. Si falla, se revierte automáticamente
- *
- * @param id - ID del evento
- */
 export async function registerForEventAction(id: string): Promise<FormState> {
-  const event = await registerInDb(id);
+  try {
+    const existingEvent = await getEventById(id);
 
-  if (!event) {
+    if (!existingEvent) {
+      return {
+        success: false,
+        message: 'El evento no existe.',
+      };
+    }
+
+    if (existingEvent.status !== 'publicado') {
+      return {
+        success: false,
+        message: 'El evento no está disponible.',
+      };
+    }
+
+    if (existingEvent.registeredCount >= existingEvent.capacity) {
+      return {
+        success: false,
+        message: 'El evento ya está lleno.',
+      };
+    }
+
+    const updatedEvent = await registerInDb(id);
+
+    if (!updatedEvent) {
+      return {
+        success: false,
+        message:
+          'No se pudo completar el registro. El evento puede estar lleno o no disponible.',
+      };
+    }
+
+    revalidatePath('/events');
+    revalidatePath(`/events/${id}`);
+    revalidatePath('/');
+
+    return {
+      success: true,
+      message: '¡Te has registrado correctamente!',
+      data: updatedEvent,
+    };
+  } catch (error) {
+    console.error('Error en registerForEventAction:', error);
+
     return {
       success: false,
-      message: 'No se pudo completar el registro. El evento puede estar lleno o no disponible.',
+      message: 'Ocurrió un error al registrar. Intenta nuevamente.',
     };
   }
-
-  revalidatePath(`/events/${id}`);
-
-  return {
-    success: true,
-    message: '¡Te has registrado correctamente!',
-    data: event,
-  };
 }
