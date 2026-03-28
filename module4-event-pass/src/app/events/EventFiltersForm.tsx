@@ -77,6 +77,7 @@ export function EventFiltersForm({ currentFilters }: EventFiltersFormProps): Rea
     <div className="space-y-4 rounded-lg border bg-card p-4">
       {/* Formulario con method GET */}
       <form ref={formRef} method="GET" action="/events" className="space-y-4">
+      
         {/* Búsqueda */}
         <div className="flex gap-2">
           <div className="relative flex-1">
@@ -150,6 +151,7 @@ export function EventFiltersForm({ currentFilters }: EventFiltersFormProps): Rea
           )}
         </div>
       </form>
+      
     </div>
   );
 }
